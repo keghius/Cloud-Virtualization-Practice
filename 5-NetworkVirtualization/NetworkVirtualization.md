@@ -408,7 +408,7 @@ sudo sed -i "/127.0.0.1 localhost/ s/$/ $(hostname)/" /etc/hosts
 
 ## 13. 유사 컨테이너 환경에 Network Namespace 적용해보기
 
-[유사 컨테이너 환경 구축](../week4/ContainerTechnology.md#11-cgroup-및-namespace-기반-유사-컨테이너-환경-구축)에 Network Namespace를 적용하여 격리된 네트워크 환경 구성
+[유사 컨테이너 환경 구축](../4-ContainerTechnology/ContainerTechnology.md#11-cgroup-및-namespace-기반-유사-컨테이너-환경-구축)에 Network Namespace를 적용하여 격리된 네트워크 환경 구성
 
 `cgroup` 및 `rootfs`는 week4에서 만든 `mycontainer` cgroup과, `$CROOT` 경로를 활용
 
