@@ -234,45 +234,152 @@ sudo ovs-ofctl dump-ports s1
 
 ---
 
-## 14. 심화 과제 - 로드 밸런서 구현
+## 14. ONOS 컨트롤러
 
-`라운드 로빈 방식으로 서버 선택하는 로드밸런서 구현해보기`
+`ONOS`는 오픈소스 SDN 컨트롤러로 대규모 네트워크 환경에 적합
+
+- OpenFlow 기반 SDN 컨트롤러
+- Web UI 및 REST API 제공
 
 ---
 
-## 15. 기타 SDN 컨트롤러
+## 15. Docker 설치 및 ONOS 실행
+
+```bash
+# Docker 설치
+sudo apt-get update
+sudo apt-get install -y docker.io
+
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# sudo 없이 docker 사용 (선택사항)
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+![figure19](./images/figure19.png)
+
+```bash
+# ONOS 실행
+docker run -d --net=host --name onos onosproject/onos:2.1.0
+
+# 로그 확인 (ONOS 완전히 뜰 때까지 대기)
+docker logs -f onos
+```
+
+![figure20](./images/figure20.png)
+
+### 참고
+
+`--net=host` 옵션으로 컨테이너를 호스트 네트워크 스택에 직접 연결하므로 별도 포트 매핑 없이 ONOS가 사용하는 포트가 그대로 열림
+
+- `8181` - Web UI
+- `6653` - OpenFlow
+- `8101` - ONOS CLI
+
+---
+
+## 16. Mininet에서 ONOS 연결
+
+브라우저에서 접속:
+```
+http://<IP주소>:8181/onos/ui/login.html
+```
+계정: `onos / rocks`
+
+**앱 활성화 (Applications 탭에서)**
+- `OpenFlow Provider Suite` → Activate
+- `Reactive Forwarding` → Activate
+
+```bash
+# Mininet 실행 (ONOS 컨트롤러와 연결)
+sudo mn --topo tree,depth=2,fanout=2 \
+  --controller=remote,ip=,port=6653 \
+  --switch ovs,protocols=OpenFlow13
+```
+
+---
+
+## 17. ONOS 동작 확인
+
+### 토폴로지 확인
+
+- ONOS UI 좌측 메뉴 → **Topology** 에서 스위치/호스트 연결 확인
+
+```bash
+mininet> pingall
+```
+
+### Flow Table 확인
+
+```bash
+# OVS에서 Flow 확인
+sudo ovs-ofctl -O OpenFlow13 dump-flows s1
+
+# ONOS CLI 접속
+docker exec -it onos /root/onos/bin/client -h localhost
+
+onos> flows
+onos> hosts
+onos> devices
+
+# REST API로 Flow 조회
+curl -u onos:rocks \
+  http://localhost:8181/onos/v1/flows | python3 -m json.tool
+```
+
+---
+
+## 18. ONOS 방화벽 구현
+
+REST API로 특정 트래픽 차단 Flow 직접 설치
+
+```bash
+# h1(10.0.0.1) → h3(10.0.0.3) 차단 Flow 설치
+curl -u onos:rocks -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "priority": 50000,
+    "timeout": 0,
+    "isPermanent": true,
+    "deviceId": "",
+    "treatment": {"instructions": []},
+    "selector": {
+      "criteria": [
+        {"type": "ETH_TYPE", "ethType": "0x800"},
+        {"type": "IPV4_SRC", "ip": "10.0.0.1/32"},
+        {"type": "IPV4_DST", "ip": "10.0.0.3/32"}
+      ]
+    }
+  }' \
+  http://localhost:8181/onos/v1/flows/
+
+# 차단 확인
+mininet> h1 ping -c 3 h3
+```
+
+### 참고
+
+Mininet 호스트는 Linux Network Namespace로 격리되어 있어 트래픽이 외부로 나가지 않음. ONOS가 설치하는 Flow는 Mininet 내부 가상 OVS 스위치 안에서만 처리됨
+
+---
+
+## 19. 기타 SDN 컨트롤러
 
 ### Ryu
 
 - https://github.com/faucetsdn/ryu
 
----
-
-### ONOS
-
-```bash
-# ONOS 실행
-docker run -d --net=host --name onos onosproject/onos:2.1.0
-```
-- 접속:  
-  - http://<IP주소>:8181/onos/ui/login.html  
-- 계정:  
-  - onos / rocks  
-- 설정:
-  - Applications -> OpenFlow Provider Suite, Reactive Forwarding (Activation)
-
-```bash
-# Mininet에서 ONOS 연결
-sudo mn --topo tree,depth=2,fanout=2 \
---controller=remote,ip=<IP주소>,port=6653 \
---switch ovs,protocols=OpenFlow13
-```
-
----
-
 ### OpenDayLight
 
 - https://docs.opendaylight.org/en/latest/getting-started-guide/installing_opendaylight.html
+
+---
+
+## 20. 심화 과제 - 로드 밸런서 구현
+
+`라운드 로빈 방식으로 서버 선택하는 로드밸런서 구현해보기`
 
 
 ---
