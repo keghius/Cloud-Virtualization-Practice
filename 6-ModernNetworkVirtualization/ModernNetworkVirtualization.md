@@ -246,9 +246,21 @@ sudo ovs-ofctl dump-ports s1
 ## 15. Docker 설치 및 ONOS 실행
 
 ```bash
+# 필수 패키지 설치
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl gnupg
+
+# Docker GPG 키 추가
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+# Docker 저장소 추가
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
 # Docker 설치
 sudo apt-get update
-sudo apt-get install -y docker.io
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io
 
 sudo systemctl start docker
 sudo systemctl enable docker
@@ -256,6 +268,9 @@ sudo systemctl enable docker
 # sudo 없이 docker 사용 (선택사항)
 sudo usermod -aG docker $USER
 newgrp docker
+
+# 도커 설치 확인
+docker --version
 ```
 
 ![figure19](./images/figure19.png)
@@ -269,14 +284,21 @@ docker logs -f onos
 ```
 
 ![figure20](./images/figure20.png)
+![figure21](./images/figure21.png)
 
 ### 참고
 
 `--net=host` 옵션으로 컨테이너를 호스트 네트워크 스택에 직접 연결하므로 별도 포트 매핑 없이 ONOS가 사용하는 포트가 그대로 열림
 
+```bash
+docker inspect --format='{{range $p, $conf := .Config.ExposedPorts}}{{$p}}{{end}}' onos
+```
+
 - `8181` - Web UI
 - `6653` - OpenFlow
 - `8101` - ONOS CLI
+
+![figure22](./images/figure22.png)
 
 ---
 
@@ -292,12 +314,20 @@ http://<IP주소>:8181/onos/ui/login.html
 - `OpenFlow Provider Suite` → Activate
 - `Reactive Forwarding` → Activate
 
+![figure23](./images/figure23.png)
+![figure24](./images/figure24.png)
+
+
 ```bash
 # Mininet 실행 (ONOS 컨트롤러와 연결)
-sudo mn --topo tree,depth=2,fanout=2 \
-  --controller=remote,ip=,port=6653 \
+# Tree 토폴로지: 깊이 2, 스위치당 하위 노드 3개 (스위치 4개, 호스트 9개)
+# hostname -I : 호스트의 IP 주소 확인 | awk '{print $1}' : 첫 번째 IP 주소만 추출(ens3 인터페이스의 IP)
+sudo mn --topo tree,depth=2,fanout=3 \
+  --controller=remote,ip=$(hostname -I | awk '{print $1}'),port=6653 \
   --switch ovs,protocols=OpenFlow13
 ```
+
+![figure25](./images/figure25.png)
 
 ---
 
@@ -307,27 +337,52 @@ sudo mn --topo tree,depth=2,fanout=2 \
 
 - ONOS UI 좌측 메뉴 → **Topology** 에서 스위치/호스트 연결 확인
 
+![figure26](./images/figure26.png)
+
 ```bash
+# pingall 명령어를 통해 호스트 간 연결 확인
+# 호스트 간 연결이 성공하면 ONOS UI에서 Flow가 설치되는 것을 확인할 수 있음(웹UI에서 H 입력 시 호스트 출력)
 mininet> pingall
 ```
+
+![figure27](./images/figure27.png)
 
 ### Flow Table 확인
 
 ```bash
 # OVS에서 Flow 확인
 sudo ovs-ofctl -O OpenFlow13 dump-flows s1
+```
 
+![figure28](./images/figure28.png)
+
+```bash
 # ONOS CLI 접속
-docker exec -it onos /root/onos/bin/client -h localhost
+docker exec -it onos /root/onos/apache-karaf-4.2.3/bin/client -h localhost
 
-onos> flows
-onos> hosts
-onos> devices
+# karaf@root에서
+# ONOS에 연결된 스위치 목록 확인
+flows
 
+# 학습된 호스트(MAC/IP) 목록 확인
+hosts
+
+# 스위치에 설치된 Flow 규칙 목록 확인
+devices
+```
+
+![figure29](./images/figure29.png)
+![figure30](./images/figure30.png)
+![figure31](./images/figure31.png)
+![figure32](./images/figure32.png)
+
+```bash
 # REST API로 Flow 조회
 curl -u onos:rocks \
   http://localhost:8181/onos/v1/flows | python3 -m json.tool
 ```
+
+![figure33](./images/figure33.png)
 
 ---
 
@@ -337,13 +392,14 @@ REST API로 특정 트래픽 차단 Flow 직접 설치
 
 ```bash
 # h1(10.0.0.1) → h3(10.0.0.3) 차단 Flow 설치
-curl -u onos:rocks -X POST \
+# h1, h3가 연결된 스위치에 Flow 규칙 설치 (hosts 명령어로 확인, 예시에서는 s2) | deviceId 및 주소의 마지막 of 아래에 스위치 ID 입력
+curl -v -u onos:rocks -X POST \
   -H 'Content-Type: application/json' \
   -d '{
     "priority": 50000,
     "timeout": 0,
     "isPermanent": true,
-    "deviceId": "",
+    "deviceId": "of:0000000000000002",
     "treatment": {"instructions": []},
     "selector": {
       "criteria": [
@@ -353,11 +409,23 @@ curl -u onos:rocks -X POST \
       ]
     }
   }' \
-  http://localhost:8181/onos/v1/flows/
+  http://localhost:8181/onos/v1/flows/of:0000000000000002
 
 # 차단 확인
 mininet> h1 ping -c 3 h3
 ```
+
+![figure34](./images/figure34.png)
+![figure35](./images/figure35.png)
+
+```bash
+# 설치된 Flow 확인
+# of 아래에 스위치 ID 입력(없어도 전체 Flow 조회는 가능)
+curl -u onos:rocks \
+  http://localhost:8181/onos/v1/flows/of:0000000000000002 | python3 -m json.tool
+# http://localhost:8181/onos/v1/flows/
+``` 
+
 
 ### 참고
 
