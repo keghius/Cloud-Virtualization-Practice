@@ -250,10 +250,11 @@ sudo dd if=/dev/zero of=/srv/iscsi_disks/disk01.img bs=1G count=1
 # iSCSI 타겟 설정 파일 작성
 # [Target IQN]은 iqn.2026-05.kr.ac.dankook:[학번]과 같이 고유하게 설정할 것
 # [Initiator IP]는 후에 iSCSI Initiator를 설치할 호스트의 IP 주소로 설정할 것
-sudo tee /etc/tgt/conf.d/iscsi-target.conf <
+sudo tee /etc/tgt/conf.d/iscsi-target.conf <<EOF
+<target [Target IQN]>
   backing-store /srv/iscsi_disks/disk01.img
   initiator-address [Initiator IP]
-
+</target>
 EOF
 ```
 
@@ -273,7 +274,7 @@ sudo tgtadm --mode target --op show
 - `iSCSI의 IQN(iSCSI Qualified Name)`은 고유한 식별자로, 전 세계적으로 중복되지 않아야 함  
   예: `iqn.2026-05.com.boanlab:storage.disk1`
   - `iqn` : iSCSI 규격을 의미하는 고정 문자열 (필수)
-  - `2026-05` : 도메인 이름을 역순으로 표현한 날짜 (예: 2026년 4월)
+  - `2026-05` : 도메인 이름을 역순으로 표현한 날짜 (예: 2026년 5월)
   - `com.boanlab` : 조직의 도메인 이름을 역순으로 표현한 부분 (예: boanlab.com)
   - `storage.disk1` : 해당 타겟을 구분하기 위해 사용자가 정하는 이름
 
@@ -293,11 +294,12 @@ sudo tgtadm --mode target --op show
 
 ```bash
 # 기존 타겟 설정 파일에 CHAP 인증 추가
-sudo tee /etc/tgt/conf.d/iscsi-target.conf <
+sudo tee /etc/tgt/conf.d/iscsi-target.conf <<EOF
+<target [Target IQN]>
   backing-store /srv/iscsi_disks/disk01.img
   initiator-address [Initiator IP]
   incominguser [username] [password]
-
+</target>
 EOF
 
 # iSCSI 서비스 재시작
