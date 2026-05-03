@@ -150,11 +150,44 @@ ls -l /mnt/nfs_share
 
 - `umount` 시 `device is busy` 오류가 발생하면 해당 디렉토리를 사용하는 프로세스가 존재하는 것이므로 종료 후 다시 시도
   (`lsof +D /mnt/nfs_share` 또는 `fuser -m /mnt/nfs_share`로 확인 가능)  
+
 ![figure8](./images/figure8.png)
 
 ---
 
-## 8. iSCSI 설치 및 운영
+## 8. NFS 자동 마운트 설정 (/etc/fstab)
+
+재부팅 후에도 NFS가 자동으로 마운트되도록 `/etc/fstab`에 설정을 추가할 수 있음
+
+```bash
+# /etc/fstab에 NFS 마운트 설정 추가
+echo "[NFS Server IP]:/srv/nfs_share /mnt/nfs_share nfs defaults,_netdev 0 0" | sudo tee -a /etc/fstab
+
+# 설정 확인
+cat /etc/fstab
+```
+
+```bash
+# 재부팅 없이 fstab 기반으로 즉시 마운트 테스트
+sudo mount -a
+
+# 마운트 확인
+mount | grep nfs
+```
+
+### 참고
+- `/etc/fstab` 필드 구성: `[장치] [마운트포인트] [파일시스템] [옵션] [dump] [fsck]`
+  - `nfs` : 파일시스템 타입
+  - `defaults` : rw, suid, exec, auto, nouser, async 옵션을 포함하는 기본값
+  - 마지막 두 필드 `0 0` : dump 백업 비활성화, 부팅 시 fsck 검사 비활성화  
+    (NFS는 로컬 파일시스템이 아니므로 fsck 대상이 아님)
+
+- `_netdev` 옵션을 추가하면 네트워크가 활성화된 이후에 마운트를 시도하도록 보장함  
+  - 이 옵션이 없으면 부팅 시 네트워크 준비 전에 마운트를 시도하여 실패할 수 있음
+
+---
+
+## 9. iSCSI 설치 및 운영
 
 - 가상 머신 2개를 준비  
 - 하나는 `iSCSI 서버`, 다른 하나는 `iSCSI Initiator`로 이용
@@ -163,7 +196,7 @@ ls -l /mnt/nfs_share
 
 ---
 
-## 9. iSCSI 서버 설정
+## 10. iSCSI 서버 설정
 
 ```bash
 # iSCSI 서버로 이용할 호스트에서 수행
@@ -187,17 +220,16 @@ sudo dd if=/dev/zero of=/srv/iscsi_disks/disk01.img bs=1G count=1
 
 ---
 
-## 10. iSCSI 타겟 설정
+## 11. iSCSI 타겟 설정
 
 ```bash
 # iSCSI 타겟 설정 파일 작성
-# [Target IQN]은 iqn.2026-04.kr.ac.dankook:[학번]과 같이 고유하게 설정할 것
+# [Target IQN]은 iqn.2026-05.kr.ac.dankook:[학번]과 같이 고유하게 설정할 것
 # [Initiator IP]는 후에 iSCSI Initiator를 설치할 호스트의 IP 주소로 설정할 것
-sudo tee /etc/tgt/conf.d/iscsi-target.conf <<EOF
-<target [Target IQN]>
+sudo tee /etc/tgt/conf.d/iscsi-target.conf <
   backing-store /srv/iscsi_disks/disk01.img
   initiator-address [Initiator IP]
-</target>
+
 EOF
 ```
 
@@ -215,15 +247,77 @@ sudo tgtadm --mode target --op show
 
 ### 참고
 - `iSCSI의 IQN(iSCSI Qualified Name)`은 고유한 식별자로, 전 세계적으로 중복되지 않아야 함  
-  예: `iqn.2026-04.com.boanlab:storage.disk1`
+  예: `iqn.2026-05.com.boanlab:storage.disk1`
   - `iqn` : iSCSI 규격을 의미하는 고정 문자열 (필수)
-  - `2026-04` : 도메인 이름을 역순으로 표현한 날짜 (예: 2026년 4월)
+  - `2026-05` : 도메인 이름을 역순으로 표현한 날짜 (예: 2026년 4월)
   - `com.boanlab` : 조직의 도메인 이름을 역순으로 표현한 부분 (예: boanlab.com)
   - `storage.disk1` : 해당 타겟을 구분하기 위해 사용자가 정하는 이름
 
 ---
 
-## 11. iSCSI Initiator 설정
+## 12. iSCSI CHAP 인증 설정
+
+### CHAP(Challenge Handshake Authentication Protocol)란?
+
+- iSCSI에서 Initiator가 Target에 접속할 때 사용하는 인증 방식
+- Target이 Initiator에게 랜덤 Challenge를 보내고, Initiator는 공유된 비밀(password)로 응답값을 생성하여 전송
+- 비밀번호 자체가 네트워크에 평문으로 전송되지 않으므로 `initiator-address`만으로 제한하는 것보다 보안성이 높음
+- **단방향 CHAP**: Target이 Initiator를 인증 (일반적)
+- **상호 CHAP(Mutual CHAP)**: Target과 Initiator가 서로 인증
+
+### CHAP 설정 — iSCSI 서버
+
+```bash
+# 기존 타겟 설정 파일에 CHAP 인증 추가
+sudo tee /etc/tgt/conf.d/iscsi-target.conf <
+  backing-store /srv/iscsi_disks/disk01.img
+  initiator-address [Initiator IP]
+  incominguser [username] [password]
+
+EOF
+
+# iSCSI 서비스 재시작
+sudo systemctl restart tgt
+
+# 설정 확인
+sudo tgtadm --mode target --op show
+```
+
+- `incominguser [username] [password]` : Initiator가 Target에 접속할 때 사용하는 자격증명
+- password는 12자 이상으로 설정 권장 (tgt 정책)
+
+### CHAP 설정 — iSCSI Initiator
+
+```bash
+# CHAP 인증 방식 활성화
+sudo iscsiadm -m node -T [Target IQN] -p [Target IP] \
+  --op update -n node.session.auth.authmethod -v CHAP
+
+# 사용자 이름 설정
+sudo iscsiadm -m node -T [Target IQN] -p [Target IP] \
+  --op update -n node.session.auth.username -v [username]
+
+# 비밀번호 설정
+sudo iscsiadm -m node -T [Target IQN] -p [Target IP] \
+  --op update -n node.session.auth.password -v [password]
+```
+
+```bash
+# 기존 세션 로그아웃 후 재로그인 (CHAP 적용)
+sudo iscsiadm -m node -T [Target IQN] -p [Target IP] --logout
+sudo iscsiadm -m node -T [Target IQN] -p [Target IP] --login
+
+# 세션 확인
+sudo iscsiadm -m session
+```
+
+### 참고
+- CHAP 설정 정보는 `/etc/iscsi/nodes/` 디렉토리 하위에 저장됨
+- 잘못된 자격증명으로 로그인 시도 시 `Login failed` 오류 발생
+
+---
+
+## 13. iSCSI Initiator 설정
 
 ```bash
 # iSCSI Initiator로 이용할 호스트에서 수행
@@ -245,7 +339,6 @@ sudo iscsiadm -m node -T [Target IQN] -p [Target IP] --login
 
 ![figure13](./images/figure13.png)
 
-
 ```bash
 # 타겟 서버에서 Initiator의 로그인 상태 확인
 sudo tgtadm --mode target --op show
@@ -255,7 +348,7 @@ sudo tgtadm --mode target --op show
 
 ---
 
-## 12. 연결된 디스크 확인
+## 14. 연결된 디스크 확인
 
 ```bash
 # 연결된 블록 디바이스 확인
@@ -277,9 +370,27 @@ lsblk
   - 앞의 prefix를 붙인 후 알파벳과 숫자가 조합되어 디바이스 이름이 생성됨  
     (예: `sda`, `sdb`, `vda`, `nvme0n1` 등)
 
+- **iSCSI Multipath (다중 경로)**
+  - 실무 환경에서 iSCSI는 단일 네트워크 경로로 연결하는 경우가 드물며,  
+    **Multipath I/O (MPIO)** 를 통해 여러 경로를 동시에 구성하는 것이 일반적
+  - Multipath를 사용하는 이유
+    - **고가용성(HA)**: 하나의 경로(NIC, 스위치, 케이블)가 장애가 나더라도 다른 경로로 자동 전환(Failover)
+    - **부하 분산**: 여러 경로에 I/O를 분산시켜 처리량(Throughput) 향상
+  - 구성 예시
+
+     ```
+    Initiator NIC1 ──── Switch A ──── Target Port1
+                                            ↕ (같은 디스크)
+    Initiator NIC2 ──── Switch B ──── Target Port2
+     ```
+
+    - 위 구성에서 `/dev/sdb`, `/dev/sdc` 두 개의 블록 디바이스가 생성되지만,  
+    실제로는 동일한 디스크를 가리킴
+    - `multipath-tools`를 사용하면 이를 하나의 논리 장치(`/dev/mapper/mpathX`)로 묶어 사용 가능
+
 ---
 
-## 13. 디스크 포맷 및 마운트
+## 15. 디스크 포맷 및 마운트
 
 ```bash
 # 연결된 디스크를 ext4 파일시스템으로 포맷
@@ -301,7 +412,7 @@ lsblk | grep <디스크이름>
 
 ---
 
-## 14. 디스크 사용 테스트
+## 16. 디스크 사용 테스트
 
 ```bash
 # 마운트 포인트의 소유자를 현재 사용자(ubuntu)로 변경
@@ -324,7 +435,7 @@ df -h /mnt/iscsi_disk
 
 ---
 
-## 15. iSCSI 연결 해제
+## 17. iSCSI 연결 해제
 
 ```bash
 # Initiator 호스트에서 수행
@@ -342,7 +453,7 @@ sudo iscsiadm -m node -T [Target IQN] -p [Target IP] --logout
 
 # 디스크가 완전히 해제되었는지 확인
 lsblk
-``` 
+```
 
 ![figure19](./images/figure19.png)
 ![figure20](./images/figure20.png)
@@ -356,6 +467,22 @@ sudo tgtadm --mode target --op show
 
 ### 참고
 - `umount` 시 `device is busy` 오류가 발생하면 [NFS에서 설명한 방법](#7-nfs-마운트-해제)과 같이 해결
+
+---
+
+## NFS vs iSCSI 비교
+
+| 항목 | NFS | iSCSI |
+|------|-----|-------|
+| **공유 수준** | 파일 시스템 수준 | 블록 수준 |
+| **접근 방식** | 파일/디렉토리 단위 접근 | 디스크 장치 단위 접근 |
+| **클라이언트 파일시스템** | 서버의 파일시스템을 그대로 사용 | 클라이언트가 직접 포맷 및 파일시스템 구성 |
+| **동시 접근** | 다수의 클라이언트가 동시에 마운트 가능 | 단일 클라이언트 전용 (기본적으로 공유 불가) |
+| **프로토콜** | TCP/UDP (포트 2049) | TCP (포트 3260) |
+| **인증** | IP 기반 접근 제어 | IP 기반 + CHAP 인증 |
+| **성능** | 상대적으로 낮음 (메타데이터 오버헤드) | 상대적으로 높음 (블록 I/O 직접 접근) |
+| **주요 용도** | 공유 데이터, 홈 디렉토리, 로그 공유 | 데이터베이스, VM 디스크 이미지, 고성능 스토리지 |
+| **운영 복잡도** | 낮음 | 높음 |
 
 ---
 
