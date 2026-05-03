@@ -39,6 +39,30 @@ ls -ld /srv/nfs_share
 
 ![figure2](./images/figure2.png)
 
+### 참고
+- `nobody:nogroup`으로 소유자를 설정하는 이유
+  - NFS는 클라이언트가 파일에 접근할 때 클라이언트의 UID/GID를 서버에 그대로 전달함
+  - 클라이언트마다 UID/GID가 다를 수 있으므로, 특정 사용자에 종속되지 않는 중립적인 계정인 `nobody:nogroup`으로 설정
+  - `nobody` : 권한이 거의 없는 시스템 계정으로, 소유권 충돌을 방지하기 위해 사용
+  - `nogroup` : 특정 그룹에 속하지 않는 시스템 그룹
+- `chmod 777`과 함께 사용하여 어떤 클라이언트든 접근 가능하도록 설정하는 것으로, 실습 환경용 설정임  
+  (실무에서는 보안상 권장하지 않음)
+
+- 실무에서의 권한 설정
+  - 특정 사용자/그룹만 접근할 수 있도록 소유자와 권한을 제한하여 설정
+  ```bash
+    # 예: 서버와 클라이언트 모두 동일한 UID(1000)의 사용자가 접근하는 경우
+    sudo chown 1000:1000 /srv/nfs_share
+    sudo chmod 755 /srv/nfs_share
+  ```
+  - 서버와 클라이언트의 UID/GID를 일치시키거나, Kerberos 인증(`sec=krb5`)을 사용하여 사용자 인증을 강화함
+    - `Kerberos` : MIT에서 개발한 오픈소스 네트워크 인증 프로토콜로, 별도의 인증 서버(KDC)를 통해 사용자를 검증하여 UID 위조를 방지할 수 있음
+  - `/etc/exports`에서 `*` 대신 허용할 클라이언트 IP 또는 대역을 명시적으로 지정
+  ```bash
+    # 예: 특정 IP 대역만 허용
+    /srv/nfs_share 192.168.1.0/24(rw,sync,no_subtree_check)
+  ```
+
 ---
 
 ## 3. NFS 공유 설정
