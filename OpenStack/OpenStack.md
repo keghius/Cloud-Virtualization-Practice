@@ -1061,7 +1061,6 @@ sudo ss -tlnp | grep 9999
 ![figure59](./images/figure59.png)
 
 ### 21-3. CLI / GUI 작업 매핑
-sssssssssssss
 CLI로 수행한 작업을 두 대시보드에서 동일하게 수행하며 UX 차이 비교
 
 | 작업 | 대응 CLI |
