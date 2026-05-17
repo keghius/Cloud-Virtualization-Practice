@@ -5,7 +5,6 @@
 - 가상 머신 1대를 준비하여 단일 노드(All-in-One) 환경으로 OpenStack 설치
 - 설치 도구는 OpenStack 공식 개발/평가용 도구인 `DevStack` 사용
 - OpenStack 릴리스는 `2026.1 Gazpacho` (최신 안정 버전)
-- 부록에서 컴퓨트 노드 1대를 추가하여 Multi-Node 환경 확장
 - DevStack은 빠른 설치 및 개발을 위한 도구로, 운영 환경에서는 `Packstack`, `Kolla`, `Ansible` 등 다른 설치 방법 권장
 
 ---
