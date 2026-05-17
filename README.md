@@ -52,5 +52,11 @@ cupark@dankook.ac.kr
 
 ---
 
+### 오픈스택 실습 - [바로가기](OpenStack/OpenStack.md)
+
+- DevStack 기반 OpenStack 설치 및 주요 컴포넌트 실습
+
+---
+
 ## Networked Systems and Security Lab (BoanLab) @ DKU 
 <img src="./images/boanlab_logo.svg" width="25%"/>
