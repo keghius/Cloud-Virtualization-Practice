@@ -52,9 +52,15 @@ cupark@dankook.ac.kr
 
 ---
 
-### 오픈스택 실습 - [바로가기](OpenStack/OpenStack.md)
+### 오픈스택 설치 실습 - [바로가기](OpenStack/OpenStack.md)
 
-- DevStack 기반 OpenStack 설치 및 주요 컴포넌트 실습
+- Ubuntu 24.04 환경에서 OpenStack 설치 및 구성 실습
+
+---
+
+### 오픈스택 사용해보기 - [바로가기](DevStack/DevStack.md)
+
+- DevStack을 이용한 OpenStack 빠른 설치 및 여러 컴포넌트 사용 실습
 
 ---
 
