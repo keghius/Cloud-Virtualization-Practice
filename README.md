@@ -64,5 +64,11 @@ cupark@dankook.ac.kr
 
 ---
 
+### 클라우드 운영 및 분석 기술 실습 - [바로가기](CloudOperationAnalysis/CloudOperationAnalysis.md)
+
+- Prometheus, Grafana 기반 클라우드 인프라 모니터링 및 분석 실습, ELK 스택 기반 로그 수집 및 분석 실습, OTel 기반 트레이싱 실습
+
+---
+
 ## Networked Systems and Security Lab (BoanLab) @ DKU 
 <img src="./images/boanlab_logo.svg" width="25%"/>
