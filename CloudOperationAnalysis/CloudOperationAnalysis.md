@@ -1230,12 +1230,13 @@ sudo apt install -y filebeat
 sudo mkdir -p /var/log/nginx-sample
 
 # 임의의 nginx access log 형식 데이터 생성
-sudo tee /var/log/nginx-sample/access.log > /dev/null <<'EOF'
-192.168.1.10 - - [21/Mar/2024:14:23:01 +0900] "GET /api/login HTTP/1.1" 200 1024 "-" "Mozilla/5.0"
-192.168.1.11 - - [21/Mar/2024:14:23:02 +0900] "POST /api/checkout HTTP/1.1" 500 512 "-" "Mozilla/5.0"
-192.168.1.12 - - [21/Mar/2024:14:23:03 +0900] "GET /api/search?q=test HTTP/1.1" 200 2048 "-" "curl/7.81"
-192.168.1.13 - - [21/Mar/2024:14:23:04 +0900] "GET /api/login HTTP/1.1" 401 256 "-" "Mozilla/5.0"
-192.168.1.14 - - [21/Mar/2024:14:23:05 +0900] "POST /api/checkout HTTP/1.1" 200 768 "-" "Mozilla/5.0"
+NOW=$(date '+%d/%b/%Y:%H:%M:%S %z')
+sudo tee /var/log/nginx-sample/access.log > /dev/null <<EOF
+192.168.1.10 - - [$NOW] "GET /api/login HTTP/1.1" 200 1024 "-" "Mozilla/5.0"
+192.168.1.11 - - [$NOW] "POST /api/checkout HTTP/1.1" 500 512 "-" "Mozilla/5.0"
+192.168.1.12 - - [$NOW] "GET /api/search?q=test HTTP/1.1" 200 2048 "-" "curl/7.81"
+192.168.1.13 - - [$NOW] "GET /api/login HTTP/1.1" 401 256 "-" "Mozilla/5.0"
+192.168.1.14 - - [$NOW] "POST /api/checkout HTTP/1.1" 200 768 "-" "Mozilla/5.0"
 EOF
 ```
 
@@ -1340,7 +1341,7 @@ curl "http://localhost:9200/lab-nginx-*/_count?pretty"
 2. 상단 Data view 드롭다운에서 `Nginx Logs` 선택
 3. 우측 상단 시간 범위를 `Last 1 hour` 또는 `Last 24 hours` 로 설정
 
-샘플 로그의 타임스탬프가 과거(2024년)이므로 데이터가 안 보이면 시간 범위를 `Last 5 years` 등으로 넓혀서 확인
+샘플 로그가 현재 시각으로 생성되므로 `Last 1 hour` 범위에서 바로 표시됨. 안 보이면 우측 상단 시간 범위를 넓히거나 새로고침
 
 ### KQL 쿼리 예시
 
