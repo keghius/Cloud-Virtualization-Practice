@@ -13,10 +13,7 @@
 | 시각화 | Grafana | 3000 |
 | 로그 수집/저장 | Filebeat, Logstash, Elasticsearch | 5044, 9200 |
 | 로그 시각화 | Kibana | 5601 |
-| 분산 추적 수집 | OpenTelemetry Collector | 4317, 4318 |
-| 분산 추적 시각화 | Jaeger | 16686 |
-
-[figure1]
+| 분산 추적 수집/변환 | OpenTelemetry Collector | 4317, 4318, 8889 |
 
 ---
 
@@ -31,7 +28,7 @@
 
 ### 필수 패키지 설치
 
-```
+```bash
 # 패키지 인덱스 갱신
 sudo apt update
 
@@ -43,7 +40,7 @@ sudo apt install -y curl wget tar gnupg apt-transport-https \
 
 ### 작업 디렉토리 생성
 
-```
+```bash
 # 다운로드 및 설정 파일 저장용 디렉토리
 mkdir -p ~/observability
 cd ~/observability
@@ -63,7 +60,7 @@ cd ~/observability
 
 ### Prometheus 전용 사용자 생성
 
-```
+```bash
 # 시스템 사용자 생성 (로그인 불가, 홈 디렉토리 없음)
 sudo useradd --no-create-home --shell /bin/false prometheus
 
@@ -73,21 +70,17 @@ sudo mkdir -p /etc/prometheus /var/lib/prometheus
 
 ### 바이너리 다운로드 및 설치
 
-```
+```bash
 # Prometheus 릴리즈 다운로드 (버전은 최신으로 변경 가능)
 cd ~/observability
-wget https://github.com/prometheus/prometheus/releases/download/v2.55.1/prometheus-2.55.1.linux-amd64.tar.gz
+wget https://github.com/prometheus/prometheus/releases/download/v3.5.2/prometheus-3.5.2.linux-amd64.tar.gz
 
 # 압축 해제
-tar xvf prometheus-2.55.1.linux-amd64.tar.gz
+tar xvf prometheus-3.5.2.linux-amd64.tar.gz
 
 # 바이너리를 /usr/local/bin 으로 이동
-sudo cp prometheus-2.55.1.linux-amd64/prometheus /usr/local/bin/
-sudo cp prometheus-2.55.1.linux-amd64/promtool /usr/local/bin/
-
-# 설정 및 콘솔 파일 복사
-sudo cp -r prometheus-2.55.1.linux-amd64/consoles /etc/prometheus
-sudo cp -r prometheus-2.55.1.linux-amd64/console_libraries /etc/prometheus
+sudo cp prometheus-3.5.2.linux-amd64/prometheus /usr/local/bin/
+sudo cp prometheus-3.5.2.linux-amd64/promtool /usr/local/bin/
 
 # 소유권 변경
 sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
@@ -96,12 +89,12 @@ sudo chown prometheus:prometheus /usr/local/bin/prometheus /usr/local/bin/promto
 
 ### 설치 확인
 
-```
+```bash
 # 버전 확인
 prometheus --version
 ```
 
-[figure2]
+![figure1](./images/figure1.png)
 
 ---
 
@@ -109,7 +102,7 @@ prometheus --version
 
 ### prometheus.yml 작성
 
-```
+```bash
 # 설정 파일 생성
 sudo tee /etc/prometheus/prometheus.yml > /dev/null <<EOF
 global:
@@ -122,13 +115,18 @@ scrape_configs:
       - targets: ['localhost:9090']
 EOF
 
+# 작성 됐는지 확인
+cat /etc/prometheus/prometheus.yml
+
 # 소유권 적용
 sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml
 ```
 
+![figure2](./images/figure2.png)
+
 ### systemd 서비스 등록
 
-```
+```bash
 sudo tee /etc/systemd/system/prometheus.service > /dev/null <<EOF
 [Unit]
 Description=Prometheus
@@ -142,8 +140,6 @@ Type=simple
 ExecStart=/usr/local/bin/prometheus \
   --config.file=/etc/prometheus/prometheus.yml \
   --storage.tsdb.path=/var/lib/prometheus/ \
-  --web.console.templates=/etc/prometheus/consoles \
-  --web.console.libraries=/etc/prometheus/console_libraries \
   --web.listen-address=0.0.0.0:9090 \
   --web.enable-lifecycle
 
@@ -154,7 +150,7 @@ EOF
 
 ### 서비스 시작
 
-```
+```bash
 # systemd 데몬 재로드
 sudo systemctl daemon-reload
 
@@ -166,19 +162,23 @@ sudo systemctl enable prometheus
 sudo systemctl status prometheus
 ```
 
+![figure3](./images/figure3.png)
+
 ### 웹 UI 접속 확인
 
 브라우저에서 `http://<호스트 IP>:9090` 접속
 
 상단 메뉴 `Status > Targets` 에서 `prometheus` 타겟이 `UP` 상태인지 확인
 
-[figure3]
+![figure4](./images/figure4.png)
 
 ### 참고
 
 - `--web.enable-lifecycle` 옵션은 `curl -X POST http://localhost:9090/-/reload` 로 무중단 설정 재로드를 가능하게 함
 - TSDB 저장 경로(`/var/lib/prometheus`)는 시계열 데이터가 누적되는 위치이며 디스크 용량 관리 대상
 - 기본 보존 기간은 15일이며 `--storage.tsdb.retention.time=30d` 옵션으로 변경 가능
+- 본 실습은 **3.5 LTS(Long-Term Support)** 계열을 사용함 — LTS 는 약 1년간 보안·버그픽스를 받아 수업·운영 환경에 적합함 (일반 마이너 릴리즈는 6주 주기로 패치가 종료됨)
+- Prometheus 3.x 는 새로운 웹 UI 와 UTF-8 메트릭 이름을 기본 지원하며, scrape 대상의 `Content-Type` 헤더 검증이 v2 보다 엄격해짐 (표준 Exporter 는 올바른 헤더를 보내므로 본 실습에는 영향 없음)
 
 ---
 
@@ -188,23 +188,27 @@ sudo systemctl status prometheus
 
 ### 전용 사용자 및 바이너리 설치
 
-```
+```bash
 # 시스템 사용자 생성
 sudo useradd --no-create-home --shell /bin/false node_exporter
 
 # 바이너리 다운로드
 cd ~/observability
-wget https://github.com/prometheus/node_exporter/releases/download/v1.8.2/node_exporter-1.8.2.linux-amd64.tar.gz
+wget https://github.com/prometheus/node_exporter/releases/download/v1.11.1/node_exporter-1.11.1.linux-amd64.tar.gz
 
-# 압축 해제 및 설치
-tar xvf node_exporter-1.8.2.linux-amd64.tar.gz
-sudo cp node_exporter-1.8.2.linux-amd64/node_exporter /usr/local/bin/
+# 압축 해제
+tar xvf node_exporter-1.11.1.linux-amd64.tar.gz
+
+# 바이너리를 /usr/local/bin 으로 이동
+sudo cp node_exporter-1.11.1.linux-amd64/node_exporter /usr/local/bin/
+
+# 소유권 변경
 sudo chown node_exporter:node_exporter /usr/local/bin/node_exporter
 ```
 
 ### systemd 서비스 등록
 
-```
+```bash
 sudo tee /etc/systemd/system/node_exporter.service > /dev/null <<EOF
 [Unit]
 Description=Node Exporter
@@ -221,20 +225,27 @@ ExecStart=/usr/local/bin/node_exporter --web.listen-address=:9100
 WantedBy=multi-user.target
 EOF
 
-# 서비스 시작
+# 데몬 재로드
 sudo systemctl daemon-reload
+
+# 서비스 시작 및 자동 시작 설정
 sudo systemctl start node_exporter
 sudo systemctl enable node_exporter
+
+# 상태 확인
+sudo systemctl status node_exporter
 ```
+
+![figure5](./images/figure5.png)
 
 ### 메트릭 노출 확인
 
-```
+```bash
 # /metrics 엔드포인트 직접 호출 (Pull 방식의 실체 확인)
-curl http://localhost:9100/metrics | head -30
+curl -s http://localhost:9100/metrics | grep '^node_' | head -30
 ```
 
-[figure4]
+![figure6](./images/figure6.png)
 
 ### 참고
 
@@ -248,7 +259,7 @@ curl http://localhost:9100/metrics | head -30
 
 ### 수집 대상 추가
 
-```
+```bash
 # prometheus.yml 수정
 sudo tee /etc/prometheus/prometheus.yml > /dev/null <<EOF
 global:
@@ -264,13 +275,18 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9100']
         labels:
-          instance: 'lab-server'                  # 사용자 정의 레이블 부여
+          instance: 'lab-server'                  # 사용자 정의 레이블 부여(자유롭게 수정 가능)
 EOF
+
+# 작성 됐는지 확인
+cat /etc/prometheus/prometheus.yml
 ```
+
+![figure7](./images/figure7.png)
 
 ### 무중단 설정 재로드
 
-```
+```bash
 # 서비스 재시작 없이 설정 반영
 curl -X POST http://localhost:9090/-/reload
 ```
@@ -281,7 +297,7 @@ curl -X POST http://localhost:9090/-/reload
 
 `node` Job 하위에 `lab-server` 인스턴스가 `UP` 상태인지 확인
 
-[figure5]
+![figure8](./images/figure8.png)
 
 ### 참고
 
@@ -295,11 +311,13 @@ curl -X POST http://localhost:9090/-/reload
 
 `PromQL(Prometheus Query Language)` 은 시계열 데이터를 선택하고 집계하기 위한 함수형 쿼리 언어
 
-Prometheus UI 의 `Graph` 탭에서 다음 쿼리들을 차례로 실행해보고 결과 확인
+Prometheus UI 의 `Graph` 탭에서 다음 쿼리들을 차례로 실행해보고 결과 확인(별도로 스크린샷은 제공하지 않음)
+
+![figure9](./images/figure9.png)
 
 ### Instant Vector 와 Range Vector
 
-```
+```promql
 # Instant Vector: 현재 시점의 단일 값 집합
 up
 
@@ -309,7 +327,7 @@ node_cpu_seconds_total[5m]
 
 ### Counter 메트릭과 rate() 함수
 
-```
+```promql
 # 누적 카운터 자체를 보면 단조 증가 그래프만 나옴
 node_cpu_seconds_total{mode="user"}
 
@@ -319,7 +337,7 @@ rate(node_cpu_seconds_total{mode="user"}[5m])
 
 ### 집계 연산 (Aggregation)
 
-```
+```promql
 # CPU mode 별로 합산하여 전체 CPU 사용 분포 확인
 sum by (mode) (rate(node_cpu_seconds_total[5m]))
 
@@ -329,7 +347,7 @@ sum by (mode) (rate(node_cpu_seconds_total[5m]))
 
 ### 시스템 리소스 쿼리 예시
 
-```
+```promql
 # 가용 메모리 비율(%)
 node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100
 
@@ -340,13 +358,11 @@ node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100
 rate(node_network_receive_bytes_total{device!="lo"}[5m])
 ```
 
-[figure6]
-
 ### 부하 생성을 통한 그래프 변화 관찰
 
 별도 터미널에서 CPU 부하 발생 후, Prometheus Graph 탭에서 CPU 사용률 쿼리가 변하는 것을 확인
 
-```
+```bash
 # 4개 코어에 60초간 부하 생성
 stress-ng --cpu 4 --timeout 60s
 ```
@@ -366,7 +382,7 @@ stress-ng --cpu 4 --timeout 60s
 
 ### 공식 APT 저장소 등록
 
-```
+```bash
 # GPG 키 추가
 sudo mkdir -p /etc/apt/keyrings/
 wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/grafana.gpg > /dev/null
@@ -377,10 +393,13 @@ echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stab
 
 ### 설치 및 시작
 
-```
+```bash
 # 패키지 인덱스 갱신 후 설치
 sudo apt update
 sudo apt install -y grafana
+
+# 설치 확인
+grafana -v
 
 # 서비스 시작
 sudo systemctl daemon-reload
@@ -391,6 +410,8 @@ sudo systemctl enable grafana-server
 sudo systemctl status grafana-server
 ```
 
+![figure10](./images/figure10.png)
+
 ### 웹 UI 접속
 
 브라우저에서 `http://<호스트 IP>:3000` 접속
@@ -399,7 +420,7 @@ sudo systemctl status grafana-server
 - 사용자명: `admin`
 - 비밀번호: `admin` (최초 로그인 시 변경 요구됨)
 
-[figure7]
+![figure11](./images/figure11.png)
 
 ---
 
@@ -412,17 +433,27 @@ sudo systemctl status grafana-server
 3. `Connection > Prometheus server URL` 에 `http://localhost:9090` 입력
 4. 하단 `Save & test` 클릭하여 연결 확인
 
-[figure8]
+![figure12](./images/figure12.png)
 
 ### 새 대시보드 생성
 
 1. 좌측 메뉴 `Dashboards > New > New dashboard` 클릭
-2. `Add visualization` 클릭 후 데이터소스로 Prometheus 선택
+2. `Add new element` 클릭 후 `Panel` 선택 
+3. 생성된 `Panel` 에서 `Configure visulaization` 진입
+4. `Data source` 에서 `Prometheus` 선택
+5. 아래에서 `Builder` 대신 `Code` 선택 후 아래의 쿼리 입력
+6. `Run queries` 클릭하여 결과 확인 후 우측 상단 `Save` 클릭하여 패널 저장 (시각화 타입은 우측 상단 `Change` 버튼으로 변경 가능하며, 각 패널의 권장 타입은 아래 참조)
+7. 동일한 방식으로 총 4개의 패널을 생성하여 CPU, Memory, Disk, Network 메트릭 시각화 (아래 쿼리 참조)
+
+![figure13](./images/figure13.png)
+![figure14](./images/figure14.png)
+![figure15](./images/figure15.png)
+![figure16](./images/figure16.png)
 
 ### 패널 1: CPU 사용률 (Time series)
 
 쿼리:
-```
+```promql
 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
 ```
 
@@ -434,7 +465,7 @@ sudo systemctl status grafana-server
 ### 패널 2: 메모리 사용량 (Gauge)
 
 쿼리:
-```
+```promql
 100 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100)
 ```
 
@@ -447,7 +478,7 @@ sudo systemctl status grafana-server
 ### 패널 3: 디스크 사용량 (Stat)
 
 쿼리:
-```
+```promql
 100 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100)
 ```
 
@@ -458,8 +489,11 @@ sudo systemctl status grafana-server
 ### 패널 4: 네트워크 트래픽 (Time series)
 
 쿼리:
-```
+```promql
+# Query A: 수신 트래픽
 rate(node_network_receive_bytes_total{device!="lo"}[5m])
+
+# Query B: 송신 트래픽
 rate(node_network_transmit_bytes_total{device!="lo"}[5m])
 ```
 
@@ -471,7 +505,7 @@ rate(node_network_transmit_bytes_total{device!="lo"}[5m])
 
 우측 상단 `Save dashboard` 아이콘 클릭 후 이름 입력 (예: `Node Overview`)
 
-[figure9]
+![figure17](./images/figure17.png)
 
 ### 참고
 
@@ -487,45 +521,92 @@ rate(node_network_transmit_bytes_total{device!="lo"}[5m])
 
 ### 변수 추가
 
-1. 대시보드 우상단 `Dashboard settings (톱니바퀴)` > `Variables` 진입
-2. `Add variable` 클릭
+1. 대시보드 우상단 `Edit` 진입 후 `Settings (또는 Dashboard options)` > `Variables` 로 이동
+2. `Add variable` 클릭 후 `Variable type` 을 `Query` 로 선택
+
+최신 Grafana 는 변수 쿼리를 항목별 입력(Builder) 방식으로 구성함. 직접 `label_values(...)` 함수를 타이핑하지 않고, `Query type` 을 `Label values` 로 두고 각 칸을 채우면 Grafana 가 쿼리를 자동 조립함
 
 ### Job 변수 생성
 
+`Query options > Open variable editor` 에서 다음과 같이 설정:
+
 | 항목 | 값 |
 | --- | --- |
-| Variable type | Query |
 | Name | `job` |
-| Data source | Prometheus |
-| Query | `label_values(job)` |
+| Target data source | `prometheus` |
+| Query type | `Label values` |
+| Metric | `up` |
+| Label | `job` |
+| Label filters | (없음 - 비워둠) |
 | Refresh | On dashboard load |
+
+`Preview` 클릭 시 등록된 job 목록(예: `node`, `prometheus`)이 표시되면 정상
+
+job 변수는 전체 job 목록을 가져오는 것이므로 **Label filters 가 없어야 함** (필터가 있으면 오류 발생)
 
 ### Instance 변수 생성 (Job 에 의존)
 
+다시 `Add variable` 후 동일하게 `Query` 타입으로 설정:
+
 | 항목 | 값 |
 | --- | --- |
-| Variable type | Query |
 | Name | `instance` |
-| Query | `label_values(up{job="$job"}, instance)` |
+| Target data source | `prometheus` |
+| Query type | `Label values` |
+| Metric | `up` |
+| Label | `instance` |
+| Label filters | `job` `=` `$job` |
 | Include All option | 활성화 |
+| Refresh | On dashboard load |
+
+`Label filters` 는 세 칸으로 나뉘며 각각 `job` / `=` / `$job` 을 지정함
+
+instance 변수는 job 변수와 달리 **Label filters 가 반드시 있어야** 선택한 job 에 속한 instance 만 걸러짐
+
+`Preview` 에 아무것도 안 나오면 대시보드 상단 `job` 드롭다운을 실제 값(예: `node`)으로 선택한 뒤 다시 확인
+
 
 ### 패널 쿼리에 변수 적용
 
-기존 CPU 패널 쿼리를 아래와 같이 수정:
+job/instance 드롭다운 선택이 모든 패널에 일관되게 반영되도록, 앞서 만든 4개 패널의 쿼리에 `{job="$job", instance="$instance"}` 필터를 추가함
 
-```
+**CPU 패널:**
+
+```promql
 100 - (avg by (instance) (rate(node_cpu_seconds_total{job="$job",instance="$instance",mode="idle"}[5m])) * 100)
 ```
 
-대시보드 상단에 `job`, `instance` 드롭다운이 생기며 선택값에 따라 패널이 자동 필터링됨
+**메모리 패널:**
 
-[figure10]
+```promql
+100 - (node_memory_MemAvailable_bytes{job="$job",instance="$instance"} / node_memory_MemTotal_bytes{job="$job",instance="$instance"} * 100)
+```
+
+**디스크 패널:**
+
+```promql
+100 - (node_filesystem_avail_bytes{job="$job",instance="$instance",mountpoint="/"} / node_filesystem_size_bytes{job="$job",instance="$instance",mountpoint="/"} * 100)
+```
+
+**네트워크 패널 (쿼리 2개):**
+
+```promql
+rate(node_network_receive_bytes_total{job="$job",instance="$instance",device!="lo"}[5m])
+rate(node_network_transmit_bytes_total{job="$job",instance="$instance",device!="lo"}[5m])
+```
+
+대시보드 상단에 `job`, `instance` 드롭다운이 생기며 선택값에 따라 모든 패널이 일관되게 자동 필터링됨
+
+![figure18](./images/figure18.png)
+![figure19](./images/figure19.png)
 
 ### 참고
 
-- 변수 간 의존성(Chained Variables)을 사용하면 상위 변수 선택에 따라 하위 변수의 옵션이 자동으로 갱신됨
-- `$variable_name` 외에도 `${variable_name}`, `[[variable_name]]` 형태로 참조 가능
-- `Include All option` 활성화 시 `.*` regex 가 자동 적용되어 전체 데이터 조회 가능
+- **변수 간 의존성(Chained Variables)**: 상위 변수 선택에 따라 하위 변수의 옵션이 자동 갱신됨. instance 변수가 job 선택값에 따라 걸러지는 것이 그 예시
+- **변수 참조 형식**: `$variable_name`, `${variable_name}`, `[[variable_name]]` 모두 사용 가능
+- **Include All option**: 활성화 시 `.*` regex 가 자동 적용되어 전체 데이터 조회 가능
+- **No data 발생 시**: 패널이 모두 Node Exporter 메트릭이므로 `job` 드롭다운을 `node` 로 선택해야 표시됨. `prometheus` 선택 시 `No data` 가 뜨는 것은 변수 필터링이 정상 동작한다는 의미
+- **Builder vs Code**: 최신 Grafana 의 변수 쿼리는 Builder(항목별 입력) 방식이 기본이며, `label_values(job)` 같은 함수를 직접 입력하려면 Code 방식으로 전환해야 함
 
 ---
 
@@ -535,32 +616,45 @@ rate(node_network_transmit_bytes_total{device!="lo"}[5m])
 
 ### 전용 사용자 및 디렉토리 생성
 
-```
+```bash
 sudo useradd --no-create-home --shell /bin/false alertmanager
 sudo mkdir -p /etc/alertmanager /var/lib/alertmanager
 ```
 
 ### 바이너리 설치
 
-```
+```bash
+# Alertmanager 릴리즈 다운로드
 cd ~/observability
-wget https://github.com/prometheus/alertmanager/releases/download/v0.27.0/alertmanager-0.27.0.linux-amd64.tar.gz
+wget https://github.com/prometheus/alertmanager/releases/download/v0.32.1/alertmanager-0.32.1.linux-amd64.tar.gz
 
-tar xvf alertmanager-0.27.0.linux-amd64.tar.gz
-sudo cp alertmanager-0.27.0.linux-amd64/alertmanager /usr/local/bin/
-sudo cp alertmanager-0.27.0.linux-amd64/amtool /usr/local/bin/
+# 압축 해제 및 바이너리 이동
+tar xvf alertmanager-0.32.1.linux-amd64.tar.gz
+sudo cp alertmanager-0.32.1.linux-amd64/alertmanager /usr/local/bin/
+sudo cp alertmanager-0.32.1.linux-amd64/amtool /usr/local/bin/
 
+# 소유권 변경
 sudo chown alertmanager:alertmanager /usr/local/bin/alertmanager /usr/local/bin/amtool
 sudo chown -R alertmanager:alertmanager /etc/alertmanager /var/lib/alertmanager
 ```
 
+### webhook.site 에서 테스트용 URL 발급
+
+테스트용 알림 채널로 [webhook.site](https://webhook.site) 를 사용하면 별도 Slack/이메일 설정 없이 알림 전송을 확인 가능
+
+1. 브라우저에서 `https://webhook.site` 접속
+2. 접속 시 자동으로 본인 전용 고유 URL 이 생성됨 (예: `https://webhook.site/12ab34cd-...`)
+3. 화면 상단의 `Your unique URL` 값을 복사해 둠
+4. 이 페이지를 열어둔 채로 두면, 이후 Alertmanager 가 보낸 요청이 실시간으로 표시됨
+
+![figure20](./images/figure20.png)
+
 ### Alertmanager 설정 파일 작성
 
-테스트용 알림 채널로 [webhook.site](https://webhook.site) 를 사용하면 별도 Slack/이메일 설정 없이 알림 전송 확인 가능
+위에서 복사한 URL 을 아래 설정의 `url` 항목에 붙여넣음
 
-먼저 webhook.site 에 접속하여 본인의 고유 URL 을 발급받음
-
-```
+```bash
+# 설정 파일 작성
 sudo tee /etc/alertmanager/alertmanager.yml > /dev/null <<EOF
 global:
   resolve_timeout: 5m
@@ -575,16 +669,18 @@ route:
 receivers:
   - name: 'webhook-receiver'
     webhook_configs:
-      - url: 'https://webhook.site/<발급받은-UUID>'  # 본인 URL 로 교체
+      - url: '[발급받은-URL]'      # 위에서 복사한 URL로 교체
         send_resolved: true       # 알림 해제 시에도 전송
 EOF
 
+# 소유권 적용
 sudo chown alertmanager:alertmanager /etc/alertmanager/alertmanager.yml
 ```
 
 ### systemd 서비스 등록 및 시작
 
-```
+```bash
+# 서비스 파일 작성
 sudo tee /etc/systemd/system/alertmanager.service > /dev/null <<EOF
 [Unit]
 Description=Alertmanager
@@ -604,16 +700,22 @@ ExecStart=/usr/local/bin/alertmanager \
 WantedBy=multi-user.target
 EOF
 
+# 데몬 재로드 및 서비스 시작
 sudo systemctl daemon-reload
 sudo systemctl start alertmanager
 sudo systemctl enable alertmanager
+
+# 상태 확인
+sudo systemctl status alertmanager
 ```
+
+![figure21](./images/figure21.png)
 
 ### 웹 UI 접속
 
 `http://<호스트 IP>:9093` 에서 Alertmanager UI 확인
 
-[figure11]
+![figure22](./images/figure22.png)
 
 ---
 
@@ -621,7 +723,7 @@ sudo systemctl enable alertmanager
 
 ### Prometheus 가 Alertmanager 를 인식하도록 설정 추가
 
-```
+```bash
 sudo tee /etc/prometheus/prometheus.yml > /dev/null <<EOF
 global:
   scrape_interval: 15s
@@ -650,19 +752,21 @@ EOF
 
 ### Alert Rule 파일 작성
 
-```
+```bash
 # 규칙 디렉토리 생성
 sudo mkdir -p /etc/prometheus/rules
 
-# CPU 및 메모리 관련 알림 규칙
+# CPU 및 메모리 관련 알림 규칙 (수업 시연용 - 임계값/지속시간을 낮춰 빠른 발동 유도)
 sudo tee /etc/prometheus/rules/node-alerts.yml > /dev/null <<EOF
 groups:
   - name: node-alerts
-    interval: 30s
+    interval: 15s
     rules:
       - alert: HighCPUUsage
-        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[2m])) * 100) > 80
-        for: 1m                   # 1분 이상 지속 시 발송
+        # 시연용: [1m] 평균에 임계값 50%, for 30s 로 빠르게 발동
+        # (운영 환경에서는 [2m] 평균, > 80, for 5m 등으로 상향 권장)
+        expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100) > 50
+        for: 30s
         labels:
           severity: warning
         annotations:
@@ -671,7 +775,7 @@ groups:
 
       - alert: HighMemoryUsage
         expr: (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 > 85
-        for: 2m
+        for: 1m
         labels:
           severity: warning
         annotations:
@@ -680,7 +784,7 @@ groups:
 
       - alert: InstanceDown
         expr: up == 0
-        for: 1m
+        for: 30s
         labels:
           severity: critical
         annotations:
@@ -692,29 +796,29 @@ sudo chown -R prometheus:prometheus /etc/prometheus/rules
 
 ### 규칙 문법 검증
 
-```
+```bash
 # promtool 로 사전 검증
 promtool check rules /etc/prometheus/rules/node-alerts.yml
 ```
 
 ### 설정 재로드 및 규칙 확인
 
-```
+```bash
 # Prometheus 설정 재로드
 curl -X POST http://localhost:9090/-/reload
 ```
 
 Prometheus UI `Alerts` 탭에서 정의된 규칙 3개가 표시되는지 확인
 
-[figure12]
+![figure23](./images/figure23.png)
 
 ### 알림 발생 테스트
 
 CPU 부하를 80% 이상으로 유지하여 `HighCPUUsage` 알림 트리거
 
-```
-# 모든 코어에 90초간 부하 생성
-stress-ng --cpu $(nproc) --timeout 90s
+```bash
+# 모든 코어*2에 300초간 부하 생성
+stress-ng --cpu $(($(nproc) * 2)) --timeout 300s
 ```
 
 진행 과정:
@@ -723,7 +827,7 @@ stress-ng --cpu $(nproc) --timeout 90s
 3. Alertmanager UI (`:9093`) 에서 활성 알림 수신 확인
 4. webhook.site 페이지에서 webhook 호출 내역 확인
 
-[figure13]
+![figure24](./images/figure24.png)
 
 ### 참고
 
@@ -740,7 +844,7 @@ stress-ng --cpu $(nproc) --timeout 90s
 
 ### Python 가상환경 및 라이브러리 설치
 
-```
+```bash
 cd ~/observability
 python3 -m venv exporter-venv
 source exporter-venv/bin/activate
@@ -751,7 +855,7 @@ pip install prometheus_client
 
 ### Custom Exporter 코드 작성
 
-```
+```python
 cat > ~/observability/custom_exporter.py <<'EOF'
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
 import random
@@ -799,26 +903,29 @@ EOF
 
 ### 직접 실행 및 메트릭 확인
 
-```
+```bash
 # 가상환경 활성화 상태에서 실행
 python3 ~/observability/custom_exporter.py
 ```
 
+![figure25](./images/figure25.png)
+
 별도 터미널에서 메트릭 노출 확인:
 
-```
+```bash
 curl http://localhost:8000/metrics | grep myapp
 ```
 
 3종 메트릭(Counter, Gauge, Histogram)이 모두 노출되는 것 확인
 
-[figure14]
+![figure26](./images/figure26.png)
 
 ### systemd 서비스 등록
 
 운영을 위해 서비스로 등록 (Ctrl+C 로 종료 후)
 
-```
+```bash
+# 서비스 파일 작성
 sudo tee /etc/systemd/system/custom-exporter.service > /dev/null <<EOF
 [Unit]
 Description=Custom Prometheus Exporter
@@ -835,6 +942,7 @@ Restart=on-failure
 WantedBy=multi-user.target
 EOF
 
+# 데몬 재로드 및 서비스 시작
 sudo systemctl daemon-reload
 sudo systemctl start custom-exporter
 sudo systemctl enable custom-exporter
@@ -842,7 +950,7 @@ sudo systemctl enable custom-exporter
 
 ### Prometheus 수집 대상에 추가
 
-```
+```bash
 # prometheus.yml 의 scrape_configs 에 추가
 sudo sed -i '/- job_name: '\''node'\''/i\  - job_name: '\''custom-app'\''\n    static_configs:\n      - targets: ['\''localhost:8000'\'']\n' /etc/prometheus/prometheus.yml
 
@@ -854,7 +962,7 @@ curl -X POST http://localhost:9090/-/reload
 
 Prometheus UI 에서 다음 쿼리 실행:
 
-```
+```promql
 # 엔드포인트별 초당 요청 수
 sum by (endpoint) (rate(myapp_requests_total[1m]))
 
@@ -868,7 +976,12 @@ histogram_quantile(0.99, sum by (le) (rate(myapp_request_duration_seconds_bucket
 myapp_active_users
 ```
 
-[figure15]
+![figure27](./images/figure27.png)
+
+```bash
+# python venv 종료
+deactivate
+```
 
 ### 참고
 
@@ -885,7 +998,7 @@ myapp_active_users
 
 ### Elastic 공식 APT 저장소 등록
 
-```
+```bash
 # GPG 키 추가
 wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
 
@@ -895,24 +1008,19 @@ echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] https://arti
 
 ### 설치
 
-```
+```bash
 sudo apt update
 sudo apt install -y elasticsearch
 ```
 
-설치 완료 시 출력되는 초기 비밀번호(`elastic` 사용자)를 별도 저장
-
-만약 놓쳤다면 아래 명령어로 재설정:
-
-```
-sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic
-```
+뒤에서 보안 기능(`xpack.security`)을 비활성화하므로 설치 시 출력되는 초기 비밀번호는 사용하지 않음
 
 ### 메모리 설정 (실습용 축소)
 
 기본값은 ES 가 시스템 메모리의 절반을 사용하려 하므로, 실습 환경에 맞게 축소
 
-```
+```bash
+# ES 가 사용할 힙 메모리를 1GB 로 제한 (실습용 - 운영 환경에서는 시스템 메모리의 절반 이상 권장하지 않음)
 sudo tee /etc/elasticsearch/jvm.options.d/heap.options > /dev/null <<EOF
 -Xms1g
 -Xmx1g
@@ -921,11 +1029,17 @@ EOF
 
 ### 단일 노드 모드 설정
 
-```
+```bash
 # elasticsearch.yml 주요 항목 수정
 sudo sed -i 's/#cluster.name:.*/cluster.name: lab-cluster/' /etc/elasticsearch/elasticsearch.yml
 sudo sed -i 's/#node.name:.*/node.name: node-1/' /etc/elasticsearch/elasticsearch.yml
 sudo sed -i 's/#network.host:.*/network.host: 0.0.0.0/' /etc/elasticsearch/elasticsearch.yml
+
+# 단일 노드 모드 설정
+echo "discovery.type: single-node" | sudo tee -a /etc/elasticsearch/elasticsearch.yml
+
+# 자동 생성된 initial_master_nodes 주석 처리 (node.name 변경으로 인한 이름 불일치 방지)
+sudo sed -i 's/^cluster.initial_master_nodes:/#cluster.initial_master_nodes:/' /etc/elasticsearch/elasticsearch.yml
 
 # 실습 편의를 위해 보안 기능 비활성화 (운영 환경에서는 활성화 필수)
 sudo sed -i 's/xpack.security.enabled: true/xpack.security.enabled: false/' /etc/elasticsearch/elasticsearch.yml
@@ -938,7 +1052,7 @@ sudo sed -i '/xpack.security.transport.ssl:/,/^[^ ]/{s/enabled: true/enabled: fa
 
 ### 서비스 시작
 
-```
+```bash
 sudo systemctl daemon-reload
 sudo systemctl start elasticsearch
 sudo systemctl enable elasticsearch
@@ -949,21 +1063,22 @@ sudo systemctl status elasticsearch
 
 ### 동작 확인
 
-```
+```bash
 # 클러스터 정보 조회
 curl http://localhost:9200
 
 # 클러스터 헬스 확인 (yellow 또는 green 이면 정상)
-curl http://localhost:9200/_cluster/health?pretty
+curl "http://localhost:9200/_cluster/health?pretty"
 ```
 
-[figure16]
+![figure28](./images/figure28.png)
 
 ### 참고
 
 - 운영 환경에서는 반드시 `xpack.security.enabled: true` 로 유지하고 TLS 와 인증을 활성화해야 함
-- 단일 노드 클러스터는 `status: yellow` 가 정상 상태임 (복제 샤드가 할당될 노드가 없기 때문)
+- 단일 노드 클러스터는 인덱스 생성 전 `status: green`, 인덱스 생성 후 `status: yellow` 가 정상임 (복제 샤드를 할당할 추가 노드가 없기 때문이며 데이터 동작에는 문제 없음)
 - ES 데이터는 `/var/lib/elasticsearch/` 에 저장되며 디스크 사용량 주의
+- Elastic 8.x 저장소를 사용하므로 ES/Kibana/Logstash/Filebeat 가 동일 버전대로 자동 설치됨 (Elastic Stack 은 컴포넌트 간 버전 일치가 권장됨)
 
 ---
 
@@ -973,14 +1088,14 @@ curl http://localhost:9200/_cluster/health?pretty
 
 ### 설치
 
-```
+```bash
 # Elasticsearch 저장소가 이미 등록되어 있으므로 바로 설치
 sudo apt install -y kibana
 ```
 
 ### 설정
 
-```
+```bash
 # Elasticsearch 연결 및 외부 접속 허용
 sudo sed -i 's/#server.host:.*/server.host: "0.0.0.0"/' /etc/kibana/kibana.yml
 sudo sed -i 's|#elasticsearch.hosts:.*|elasticsearch.hosts: ["http://localhost:9200"]|' /etc/kibana/kibana.yml
@@ -988,7 +1103,8 @@ sudo sed -i 's|#elasticsearch.hosts:.*|elasticsearch.hosts: ["http://localhost:9
 
 ### 서비스 시작
 
-```
+```bash
+# 대몬 재로드 및 서비스 시작
 sudo systemctl daemon-reload
 sudo systemctl start kibana
 sudo systemctl enable kibana
@@ -997,13 +1113,15 @@ sudo systemctl enable kibana
 sudo systemctl status kibana
 ```
 
+![figure29](./images/figure29.png)
+
 ### 웹 UI 접속
 
 브라우저에서 `http://<호스트 IP>:5601` 접속
 
 `Explore on my own` 선택 후 메인 화면 진입
 
-[figure17]
+![figure30](./images/figure30.png)
 
 ---
 
@@ -1013,7 +1131,7 @@ sudo systemctl status kibana
 
 ### 설치
 
-```
+```bash
 sudo apt install -y logstash
 ```
 
@@ -1021,7 +1139,7 @@ sudo apt install -y logstash
 
 Filebeat 로부터 입력을 받아, Grok 패턴으로 파싱하여 Elasticsearch 로 전송하는 파이프라인 구성
 
-```
+```bash
 sudo tee /etc/logstash/conf.d/main.conf > /dev/null <<'EOF'
 input {
   beats {
@@ -1045,22 +1163,15 @@ filter {
       match => [ "timestamp", "dd/MMM/yyyy:HH:mm:ss Z" ]
     }
   }
-
-  # syslog 파싱
-  if [fields][log_type] == "syslog" {
-    grok {
-      match => { "message" => "%{SYSLOGTIMESTAMP:syslog_timestamp} %{SYSLOGHOST:syslog_host} %{DATA:syslog_program}(?:\[%{POSINT:syslog_pid}\])?: %{GREEDYDATA:syslog_message}" }
-    }
-  }
 }
 
 output {
   elasticsearch {
     hosts => ["http://localhost:9200"]
-    index => "logs-%{[fields][log_type]}-%{+YYYY.MM.dd}"   # 일자별 인덱스
+    index => "lab-%{[fields][log_type]}-%{+YYYY.MM.dd}"   # logs- 프리픽스는 ES 내장 data stream 템플릿에 걸리므로 lab- 사용
+    data_stream => "false"                                # 일반 인덱스로 강제 (data stream 색인 거부 방지)
   }
 
-  # 디버깅용 표준 출력 (운영시 제거 권장)
   stdout {
     codec => rubydebug
   }
@@ -1070,9 +1181,10 @@ EOF
 
 ### 설정 검증 및 시작
 
-```
-# 설정 문법 검증
-sudo -u logstash /usr/share/logstash/bin/logstash --config.test_and_exit -f /etc/logstash/conf.d/main.conf
+```bash
+# 설정 문법 검증 (--path.settings 로 설정 디렉토리 지정 필요)
+sudo -u logstash /usr/share/logstash/bin/logstash --path.settings /etc/logstash --config.test_and_exit -f /etc/logstash/conf.d/main.conf
+# 위 명령어가 `Configuration OK` 를 출력하면 문법이 정상임
 
 # 서비스 시작
 sudo systemctl start logstash
@@ -1084,12 +1196,12 @@ sudo systemctl status logstash
 
 ### 동작 확인
 
-```
-# Logstash 가 5044 포트에서 수신 대기 중인지 확인
+```bash
+# Logstash(java) 가 5044 포트에서 수신 대기 중인지 확인
 sudo ss -tlnp | grep 5044
 ```
 
-[figure18]
+![figure31](./images/figure31.png)
 
 ### 참고
 
@@ -1106,7 +1218,7 @@ sudo ss -tlnp | grep 5044
 
 ### 설치
 
-```
+```bash
 sudo apt install -y filebeat
 ```
 
@@ -1114,7 +1226,7 @@ sudo apt install -y filebeat
 
 실제 nginx 가 없어도 동작 확인이 가능하도록 샘플 access log 생성
 
-```
+```bash
 sudo mkdir -p /var/log/nginx-sample
 
 # 임의의 nginx access log 형식 데이터 생성
@@ -1129,7 +1241,7 @@ EOF
 
 ### Filebeat 설정
 
-```
+```bash
 sudo tee /etc/filebeat/filebeat.yml > /dev/null <<'EOF'
 filebeat.inputs:
   - type: filestream
@@ -1138,16 +1250,7 @@ filebeat.inputs:
     paths:
       - /var/log/nginx-sample/*.log
     fields:
-      log_type: nginx                # Logstash 필터 조건에 사용
-    fields_under_root: false
-
-  - type: filestream
-    id: system-syslog
-    enabled: true
-    paths:
-      - /var/log/syslog
-    fields:
-      log_type: syslog
+      log_type: nginx
 
 output.logstash:
   hosts: ["localhost:5044"]
@@ -1162,10 +1265,7 @@ EOF
 
 ### 권한 설정 및 시작
 
-```
-# syslog 읽기 권한 부여 (adm 그룹에 추가)
-sudo usermod -a -G adm root
-
+```bash
 # 서비스 시작
 sudo systemctl start filebeat
 sudo systemctl enable filebeat
@@ -1173,35 +1273,43 @@ sudo systemctl enable filebeat
 sudo systemctl status filebeat
 ```
 
+![figure32](./images/figure32.png)
+
 ### Elasticsearch 에 인덱스 생성 확인
 
-```
+```bash
 # 생성된 인덱스 목록 조회
 curl http://localhost:9200/_cat/indices?v
 ```
 
-`logs-nginx-*`, `logs-syslog-*` 인덱스가 생성되어 있어야 함
+`lab-nginx-*` 인덱스가 생성되어 있어야 함
 
-```
+![figure33](./images/figure33.png)
+
+```bash
 # nginx 인덱스의 문서 수 확인
-curl http://localhost:9200/logs-nginx-*/_count?pretty
+curl "http://localhost:9200/lab-nginx-*/_count?pretty"
 
 # 문서 내용 샘플 조회
-curl http://localhost:9200/logs-nginx-*/_search?pretty&size=2
+curl "http://localhost:9200/lab-nginx-*/_search?pretty&size=2"
 ```
 
-[figure19]
+![figure34](./images/figure34.png)
 
 ### 새 로그 추가하여 실시간 수집 확인
 
-```
+```bash
 # 새 로그 라인 추가
-echo '192.168.1.99 - - [21/Mar/2024:14:25:00 +0900] "GET /api/test HTTP/1.1" 200 100 "-" "test-agent"' | sudo tee -a /var/log/nginx-sample/access.log
+NOW=$(date '+%d/%b/%Y:%H:%M:%S %z')
+echo "192.168.1.99 - - [$NOW] \"GET /api/test HTTP/1.1\" 200 100 \"-\" \"test-agent\"" | sudo tee -a /var/log/nginx-sample/access.log
+
 
 # 몇 초 대기 후 ES 에서 새 문서 확인
 sleep 5
-curl http://localhost:9200/logs-nginx-*/_count?pretty
+curl "http://localhost:9200/lab-nginx-*/_count?pretty"
 ```
+
+![figure35](./images/figure35.png)
 
 ### 참고
 
@@ -1219,13 +1327,12 @@ curl http://localhost:9200/logs-nginx-*/_count?pretty
 2. `Kibana > Data Views` 선택 후 `Create data view` 클릭
 3. 입력값:
    - Name: `Nginx Logs`
-   - Index pattern: `logs-nginx-*`
+   - Index pattern: `lab-nginx-*`
    - Timestamp field: `@timestamp`
 4. `Save data view to Kibana` 클릭
 
-동일하게 `logs-syslog-*` 도 생성
-
-[figure20]
+![figure36](./images/figure36.png)
+![figure37](./images/figure37.png)
 
 ### Discover 로 로그 검색
 
@@ -1233,54 +1340,62 @@ curl http://localhost:9200/logs-nginx-*/_count?pretty
 2. 상단 Data view 드롭다운에서 `Nginx Logs` 선택
 3. 우측 상단 시간 범위를 `Last 1 hour` 또는 `Last 24 hours` 로 설정
 
+샘플 로그의 타임스탬프가 과거(2024년)이므로 데이터가 안 보이면 시간 범위를 `Last 5 years` 등으로 넓혀서 확인
+
 ### KQL 쿼리 예시
 
-검색창에 다음 쿼리들을 차례로 입력:
+검색창에 다음 쿼리들을 차례로 입력 (Logstash ECS v8 모드 기준 필드명):
 
-```
+```text
 # 500 에러만 필터링
-response : 500
+http.response.status_code : 500
 
 # 특정 엔드포인트 + 에러
-request : "/api/checkout" and response >= 400
+url.original : "/api/checkout" and http.response.status_code >= 400
 
 # 클라이언트 IP 범위
-clientip : "192.168.1.*"
+source.address.keyword : 192.168.1.*
+
+# 특정 클랑언트 IP
+source.address.keyword : "192.168.1.13"
 
 # AND/OR 조합
-response : 500 or response : 401
+http.response.status_code : 500 or http.response.status_code : 401
 ```
 
-[figure21]
+![figure38](./images/figure38.png)
 
-### Lens 로 시각화 생성
+### Lens로 시각화 생성
 
 1. 좌측 메뉴 `Analytics > Visualize Library` 진입
 2. `Create visualization > Lens` 클릭
 3. Data view 로 `Nginx Logs` 선택
 
+![figure39](./images/figure39.png)
+![figure40](./images/figure40.png)
+
 ### 시각화 예시 1: 응답 상태 코드 분포 (Pie chart)
 
 - Visualization type: `Pie`
-- Slice by: `response` (Top values)
+- Slice by: `http.response.status_code` (Top values)
 - Size by: `Count of records`
+
 
 ### 시각화 예시 2: 시간대별 요청 추이 (Bar chart)
 
-- Visualization type: `Bar vertical stacked`
+- Visualization type: `Bar stacked`
 - Horizontal axis: `@timestamp`
 - Vertical axis: `Count of records`
-- Break down by: `response`
+- Break down by: `http.response.status_code`
+
 
 ### 시각화 예시 3: 엔드포인트별 평균 응답 크기 (Table)
 
 - Visualization type: `Table`
-- Rows: `request` (Top values)
-- Metrics: `Average of bytes`
+- Rows: `url.original` (Top values)
+- Metrics: `Average of http.response.body.bytes`
 
 각 시각화는 `Save` 클릭하여 라이브러리에 저장
-
-[figure22]
 
 ### 대시보드 구성
 
@@ -1289,11 +1404,14 @@ response : 500 or response : 401
 3. `Add from library` 로 저장한 시각화들을 추가
 4. 드래그로 배치 조정 후 `Save` 클릭
 
+![figure41](./images/figure41.png)
+
 ### 참고
 
 - KQL(Kibana Query Language)은 Lucene 쿼리보다 간결하나, 복잡한 쿼리는 Lucene 모드로 전환 가능
 - Data view 는 인덱스 패턴(여러 인덱스를 하나의 논리적 단위로 묶음) 위에 동작함
 - 대시보드 전체는 `Share > Export` 로 NDJSON 형식으로 export 하여 다른 환경에 import 가능
+- Logstash 가 `ecs_compatibility: v8` 모드로 동작하므로 nginx 필드가 ECS 표준 이름으로 저장됨 (예: `response` → `http.response.status_code`, `clientip` → `source.address`, `request` → `url.original`, `bytes` → `http.response.body.bytes`). 레거시 필드명을 쓰려면 grok 필터에 `ecs_compatibility => "disabled"` 지정
 
 ---
 
@@ -1305,20 +1423,31 @@ response : 500 or response : 401
 
 ### 설치
 
-```
+```bash
+# OTel Collector 의 공식 배포판인 otelcol-contrib 설치
 cd ~/observability
-wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.110.0/otelcol-contrib_0.110.0_linux_amd64.deb
+wget https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v0.148.0/otelcol-contrib_0.148.0_linux_amd64.deb
 
-sudo dpkg -i otelcol-contrib_0.110.0_linux_amd64.deb
+# 설치
+sudo dpkg -i otelcol-contrib_0.148.0_linux_amd64.deb
+
+# 서비스 등록 확인
+sudo systemctl status otelcol-contrib
 ```
 
 설치와 함께 `otelcol-contrib` 서비스가 자동 등록됨
+
+![figure42](./images/figure42.png)
 
 ### Collector 설정 작성
 
 `Receivers → Processors → Exporters` 의 파이프라인 구조 (이론 슬라이드 41 참고)
 
-```
+본 실습에서는 별도의 트레이스 시각화 백엔드(Jaeger 등) 없이, **수신한 트레이스를 메트릭으로 변환(spanmetrics connector)** 하여 Prometheus 로 노출함
+
+이를 통해 서비스별 요청 수(Rate), 에러율(Errors), 지연 시간(Duration)의 RED 메트릭을 기존 Prometheus/Grafana 스택에서 그대로 분석 가능함
+
+```bash
 sudo tee /etc/otelcol-contrib/config.yaml > /dev/null <<EOF
 receivers:
   # 애플리케이션의 OTLP 데이터 수신 (gRPC + HTTP)
@@ -1335,23 +1464,35 @@ processors:
     timeout: 5s
     send_batch_size: 512
 
-  # 리소스 속성 추가
-  resource:
-    attributes:
-      - key: deployment.environment
-        value: lab
-        action: insert
+  # spanmetrics 가 필요로 하는 속성만 남기고 리소스 스코프 정리
+  # (prometheus exporter 의 single-writer 가정 위반으로 인한 중복 timestamp 오류 방지)
+  transform:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.namespace", "deployment.environment"])
+
+connectors:
+  # 트레이스를 받아 RED 메트릭(calls, duration)으로 변환하는 커넥터
+  spanmetrics:
+    histogram:
+      unit: ms                 # 메트릭 단위를 ms 로 고정 (생성 메트릭: duration_milliseconds_*)
+      explicit:
+        buckets: [100ms, 250ms, 500ms, 1s, 2s, 5s]
+    dimensions:
+      - name: http.method
+        default: GET
+      - name: http.status_code
+    metrics_flush_interval: 15s
 
 exporters:
-  # 트레이스: Jaeger 로 전송 (OTLP gRPC)
-  otlp/jaeger:
-    endpoint: localhost:4327     # Jaeger OTLP 수신 포트
-    tls:
-      insecure: true
-
   # 메트릭: Prometheus 가 가져갈 수 있도록 노출
   prometheus:
     endpoint: 0.0.0.0:8889
+    # 리소스 속성을 메트릭 레이블로 변환
+    resource_to_telemetry_conversion:
+      enabled: true
 
   # 로그: Elasticsearch 로 전송
   elasticsearch:
@@ -1364,26 +1505,28 @@ exporters:
 
 service:
   pipelines:
+    # 트레이스 수신 → spanmetrics 커넥터로 전달 (메트릭으로 변환됨)
     traces:
       receivers: [otlp]
-      processors: [batch, resource]
-      exporters: [otlp/jaeger, debug]
+      processors: [transform, batch]
+      exporters: [spanmetrics, debug]
 
+    # 메트릭 수신: 앱이 직접 보낸 OTLP 메트릭 + spanmetrics 가 생성한 메트릭
     metrics:
-      receivers: [otlp]
-      processors: [batch, resource]
+      receivers: [otlp, spanmetrics]
+      processors: [batch]
       exporters: [prometheus, debug]
 
     logs:
       receivers: [otlp]
-      processors: [batch, resource]
+      processors: [batch]
       exporters: [elasticsearch, debug]
 EOF
 ```
 
 ### 서비스 시작
 
-```
+```bash
 sudo systemctl restart otelcol-contrib
 sudo systemctl enable otelcol-contrib
 
@@ -1393,19 +1536,20 @@ sudo systemctl status otelcol-contrib
 
 ### 동작 확인
 
-```
+```bash
 # Collector 내부 메트릭 (자체 텔레메트리)
 curl http://localhost:8888/metrics | head -20
 
-# Prometheus exporter 엔드포인트 (Collector 가 받은 OTel 메트릭이 여기로 노출됨)
+# Prometheus exporter 엔드포인트 (Collector 가 변환/수신한 메트릭이 여기로 노출됨)
+# 아직 트래픽이 없으면 spanmetrics 메트릭은 비어 있음 (섹션 20 에서 생성)
 curl http://localhost:8889/metrics
 ```
 
-[figure23]
+![figure43](./images/figure43.png)
 
 ### Prometheus 가 OTel Collector 의 메트릭을 수집하도록 설정
 
-```
+```bash
 # prometheus.yml 의 scrape_configs 에 OTel Collector 추가
 sudo tee -a /etc/prometheus/prometheus.yml > /dev/null <<EOF
 
@@ -1415,86 +1559,31 @@ sudo tee -a /etc/prometheus/prometheus.yml > /dev/null <<EOF
 EOF
 
 curl -X POST http://localhost:9090/-/reload
+
+# Prometheus UI 에서 OTel Collector 메트릭 수집 확인
 ```
+
+![figure44](./images/figure44.png)
 
 ### 참고
 
-- `otelcol-contrib` 는 다양한 vendor-specific exporter 가 포함된 배포판이며, 표준 `otelcol` 보다 무거우나 호환성이 넓음
+- `otelcol-contrib` 는 다양한 vendor-specific 컴포넌트가 포함된 배포판이며, 표준 `otelcol` 보다 무거우나 호환성이 넓음
+- 본 실습은 OTel Collector 를 특정 안정 버전(v0.148.0)으로 고정함 - OTel 은 약 6주 주기로 빠르게 갱신되며, 최신 버전에서는 `spanmetrics` 커넥터가 `span_metrics` 로 이름이 바뀌고 `duration` 기본 단위가 `ms` 에서 `s` 로 전환되는 변경이 진행 중이므로, 검증된 버전 고정이 재현성에 유리함
+- 위 config 에서 `histogram.unit: ms` 를 명시했으므로 생성 메트릭 이름은 `duration_milliseconds_*` 로 고정됨
 - Collector 는 Agent (각 호스트) 또는 Gateway (중앙 집계) 형태로 배포 가능
-- 동일한 receiver 의 데이터를 여러 exporter 로 분기 가능 (예: traces 를 Jaeger 와 Tempo 에 동시 전송)
+- **connector** 는 한 파이프라인의 출력을 다른 파이프라인의 입력으로 연결하는 컴포넌트로, `spanmetrics` 는 traces 파이프라인의 출력을 metrics 파이프라인의 입력으로 변환함
+- `spanmetrics` 가 생성하는 메트릭은 `calls_total`(요청 수), `duration_*`(지연 분포) 이며 `service_name`, `span_name` 등의 레이블을 가짐
+- 개별 요청의 span 트리(Gantt 차트)까지 시각화하려면 Jaeger, Tempo 같은 트레이스 전용 백엔드가 별도로 필요함
 
 ---
 
-## 19. Jaeger 설치
+## 19. 분산 추적 데모 애플리케이션
 
-`Jaeger` 는 분산 추적 데이터를 저장, 검색, 시각화하는 도구
-
-### All-in-one 바이너리 다운로드
-
-실습 편의를 위해 모든 컴포넌트가 하나의 바이너리에 포함된 `all-in-one` 배포판 사용
-
-```
-cd ~/observability
-wget https://github.com/jaegertracing/jaeger/releases/download/v1.62.0/jaeger-1.62.0-linux-amd64.tar.gz
-
-tar xvf jaeger-1.62.0-linux-amd64.tar.gz
-sudo cp jaeger-1.62.0-linux-amd64/jaeger-all-in-one /usr/local/bin/
-```
-
-### systemd 서비스 등록
-
-```
-sudo tee /etc/systemd/system/jaeger.service > /dev/null <<EOF
-[Unit]
-Description=Jaeger All-in-One
-After=network.target
-
-[Service]
-Type=simple
-Environment="COLLECTOR_OTLP_ENABLED=true"
-Environment="COLLECTOR_OTLP_GRPC_HOST_PORT=:4327"
-Environment="COLLECTOR_OTLP_HTTP_HOST_PORT=:4328"
-ExecStart=/usr/local/bin/jaeger-all-in-one
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl start jaeger
-sudo systemctl enable jaeger
-
-sudo systemctl status jaeger
-```
-
-### 포트 구성
-
-| 포트 | 용도 |
-| --- | --- |
-| 16686 | Jaeger Web UI |
-| 4327 | OTLP gRPC 수신 (Collector 로부터) |
-| 4328 | OTLP HTTP 수신 |
-
-OTel Collector 기본 OTLP 포트(4317/4318)와 충돌을 피하기 위해 Jaeger 는 4327/4328 로 변경 사용
-
-### 웹 UI 접속
-
-브라우저에서 `http://<호스트 IP>:16686` 접속
-
-`Service` 드롭다운에 아직 데이터가 없는 상태 확인
-
-[figure24]
-
----
-
-## 20. 분산 추적 데모 애플리케이션
-
-OTel SDK 를 사용한 두 개의 마이크로서비스를 만들어 Jaeger 에 분산 추적이 기록되는 과정 확인
+OTel SDK 를 사용한 두 개의 마이크로서비스를 만들어, 서비스 간 호출이 트레이스로 수집되고 spanmetrics 를 통해 메트릭으로 변환되는 과정 확인
 
 ### Python 환경 준비
 
-```
+```bash
 cd ~/observability
 python3 -m venv otel-venv
 source otel-venv/bin/activate
@@ -1512,7 +1601,7 @@ opentelemetry-bootstrap -a install
 
 ### Backend 서비스 작성
 
-```
+```python
 cat > ~/observability/backend.py <<'EOF'
 from flask import Flask, jsonify
 import time
@@ -1537,9 +1626,11 @@ if __name__ == '__main__':
 EOF
 ```
 
+![figure45](./images/figure45.png)
+
 ### Frontend 서비스 작성
 
-```
+```python
 cat > ~/observability/frontend.py <<'EOF'
 from flask import Flask, jsonify
 import requests
@@ -1564,13 +1655,15 @@ if __name__ == '__main__':
 EOF
 ```
 
+![figure46](./images/figure46.png)
+
 ### OTel 자동 계측으로 서비스 실행
 
 별도 터미널 2개 사용
 
 **터미널 1 (Backend):**
 
-```
+```bash
 cd ~/observability
 source otel-venv/bin/activate
 
@@ -1583,9 +1676,11 @@ OTEL_LOGS_EXPORTER=otlp \
 opentelemetry-instrument python3 backend.py
 ```
 
+![figure47](./images/figure47.png)
+
 **터미널 2 (Frontend):**
 
-```
+```bash
 cd ~/observability
 source otel-venv/bin/activate
 
@@ -1598,109 +1693,72 @@ OTEL_LOGS_EXPORTER=otlp \
 opentelemetry-instrument python3 frontend.py
 ```
 
+![figure48](./images/figure48.png)
+
 ### 트래픽 발생
 
-별도 터미널 3에서 요청을 여러 번 보내 trace 생성
+별도 터미널 3에서 요청을 반복 전송하여 trace 를 생성 (spanmetrics 집계를 위해 충분한 표본 필요)
 
+```bash
+# 정상 요청 30회
+for i in {1..30}; do curl -s http://localhost:5000/ > /dev/null; done
+
+# 느린 요청(checkout) 20회 - /slow 호출이 포함되어 지연 발생
+for i in {1..20}; do curl -s http://localhost:5000/checkout > /dev/null; done
 ```
-# 정상 요청 5회
-for i in {1..5}; do curl http://localhost:5000/; echo; done
 
-# 느린 요청(checkout) 3회
-for i in {1..3}; do curl http://localhost:5000/checkout; echo; done
+### Collector 가 변환한 spanmetrics 확인
+
+OTel Collector 가 수신한 트레이스를 메트릭으로 변환하여 `:8889` 로 노출함
+
+```bash
+# spanmetrics 가 생성한 메트릭 확인 (calls, duration)
+curl -s http://localhost:8889/metrics | grep -E 'calls_total|duration|frontend|backend'
 ```
 
-### Jaeger UI 에서 trace 확인
+`frontend-service`, `backend-service` 별로 `calls_total` 과 `duration_*` 메트릭이 노출되는 것 확인
 
-브라우저에서 `http://<호스트 IP>:16686` 접속
+![figure49](./images/figure49.png)
 
-1. `Service` 드롭다운에서 `frontend-service` 선택
-2. `Find Traces` 클릭
-3. trace 목록이 표시됨 - 각 trace 의 총 소요시간 차이 관찰
+### Prometheus 에서 트레이스 기반 메트릭 조회
 
-[figure25]
+Prometheus UI (`:9090`) 에서 다음 쿼리 실행:
 
-### Trace 상세 분석
+```promql
+# 서비스별 초당 요청 수
+sum by (service_name) (rate(traces_span_metrics_calls_total[1m]))
 
-trace 하나 클릭하여 상세 화면 진입
+# 서비스별 평균 응답 시간 (ms)
+sum by (service_name) (rate(traces_span_metrics_duration_milliseconds_sum[1m]))
+  / sum by (service_name) (rate(traces_span_metrics_duration_milliseconds_count[1m]))
 
-다음 정보들을 확인:
+# span 별 P95 지연 시간 (ms)
+histogram_quantile(0.95, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket[1m])))
+```
 
-- **Span 트리 구조**: `frontend-service` 의 HTTP 요청 → `backend-service` 호출이 자식 span 으로 표시
-- **Gantt 차트**: 각 span 의 시작/종료 시점이 시간축에 가시화됨
-- **Context Propagation**: 동일한 `traceID` 가 서비스 간에 전파된 것 확인
-- **병목 식별**: `/checkout` trace 에서 `/slow` 호출이 2초 이상 차지하는 것을 시각적으로 확인 가능
+### Grafana 대시보드에 트레이스 메트릭 패널 추가
 
-[figure26]
+섹션 8에서 만든 대시보드에 패널 추가:
 
-### Span 상세 정보 확인
+- **패널: 서비스별 요청률** — 쿼리 `sum by (service_name) (rate(traces_span_metrics_calls_total[1m]))`, Time series
+- **패널: span 별 P95 지연** — 쿼리 `histogram_quantile(0.95, sum by (le, span_name) (rate(traces_span_metrics_duration_milliseconds_bucket[1m])))`, Time series, Unit: milliseconds
 
-특정 span 클릭 시 다음 메타데이터 확인 가능:
+`/slow` span(`backend-service`)의 지연이 다른 span 보다 현저히 높게 나타나는 것을 시각적으로 확인 (의도적으로 삽입한 `time.sleep(2)` 때문에 약 2000ms)
 
-- `http.method`, `http.url`, `http.status_code` 등 표준 속성
-- `net.peer.name`, `net.peer.port` 등 네트워크 정보
-- 서비스별 리소스 속성 (`service.name`, `deployment.environment`)
+![figure50](./images/figure50.png)
 
 ### 참고
 
 - `opentelemetry-instrument` 명령어는 Python 애플리케이션을 자동으로 계측하여 코드 수정 없이 trace 를 생성함
 - 환경 변수 `OTEL_*` 로 모든 동작을 제어할 수 있음 - 코드에 vendor lock-in 없음
 - `requests` 라이브러리 자동 계측이 HTTP 헤더 `traceparent` 를 통해 trace ID 를 전파함 (W3C Trace Context 표준)
+- spanmetrics 가 생성하는 메트릭은 Prometheus 노출 시 `traces_span_metrics_` 접두사가 붙음 (`traces_span_metrics_calls_total`, `traces_span_metrics_duration_milliseconds_bucket`). 접두사를 바꾸려면 connector 의 `namespace` 설정을 조정함
+- spanmetrics 는 개별 trace 가 아닌 **집계된 RED 메트릭**을 제공함 - 어느 서비스/구간이 느린지는 알 수 있으나, 단일 요청의 전체 경로(Gantt 차트)를 보려면 Jaeger 같은 트레이스 백엔드가 필요함
 - 더 세밀한 제어가 필요하면 코드에서 `tracer.start_as_current_span()` 으로 수동 계측 가능
 
 ---
 
-## 21. 통합 시나리오: API 응답 지연 진단
-
-이론 슬라이드 12, 44~46 에서 다룬 **3단계 진단 프로세스**를 직접 수행
-
-### 시나리오
-
-`/checkout` API 의 P99 응답 시간이 평소보다 급증하였다는 사용자 리포트가 접수됨
-
-### Step 1. Detection (Metrics) - "무엇이 발생했는가?"
-
-Grafana 에서 Custom Exporter 메트릭 기반 응답시간 패널 추가
-
-```
-# /checkout 엔드포인트의 P99 응답시간
-histogram_quantile(0.99, sum by (le) (rate(myapp_request_duration_seconds_bucket[1m])))
-```
-
-OTel 데모 트래픽을 발생시키면서 그래프 변화 관찰
-
-### Step 2. Troubleshooting (Traces) - "어디서 발생했는가?"
-
-Jaeger UI 에서 `frontend-service` 의 최근 trace 조회
-
-- `Min Duration: 1s` 필터로 느린 요청만 추출
-- 느린 trace 들이 공통적으로 `/slow` 엔드포인트 호출 구간에서 지연된다는 사실 확인
-- 병목 서비스: `backend-service`, 병목 구간: `/slow` 핸들러
-
-### Step 3. Pinpointing (Logs) - "왜 발생했는가?"
-
-Kibana Discover 에서 동일 시간대 로그 검색
-
-- 시간 범위를 trace 발생 시각으로 좁힘
-- 검색어: `service.name : "backend-service" and message : *slow*`
-- 로그에서 의도적 `time.sleep(2)` 호출이 원인임을 확인
-
-### 해결 및 검증
-
-`backend.py` 에서 `/slow` 의 sleep 시간을 제거하고 재시작 후:
-
-- 새로운 trace 들의 duration 이 감소
-- Grafana P99 그래프가 정상 범위로 복귀
-
-### 참고
-
-- 이 흐름이 슬라이드 12의 `Metrics → Traces → Logs` 드릴다운 패턴의 실체임
-- 운영 환경에서는 trace ID 가 로그에도 함께 기록되어, trace 와 log 가 ID 로 직접 연결됨 (correlation)
-- `MTTR(Mean Time To Resolve)` 단축의 핵심은 이 3단계를 신속하게 수행하는 능력임
-
----
-
-## 22. 심화 과제
+## 20. 심화 과제(한번 해볼만한 과제들)
 
 ### 과제 1. Service Discovery 적용
 
@@ -1710,13 +1768,13 @@ Kibana Discover 에서 동일 시간대 로그 검색
 
 자주 사용되는 복잡한 PromQL 쿼리(예: 에러율, P99)를 사전 계산하여 새 메트릭으로 저장하는 Recording Rule 을 작성하고, 대시보드에서 활용
 
-### 과제 3. Filebeat → Elasticsearch 직접 전송
+### 과제 3. Filebeat -> Elasticsearch 직접 전송
 
 Logstash 를 거치지 않고 Filebeat 가 ES 로 직접 데이터를 전송하도록 구성하고, Logstash 경유와 비교한 장단점 분석
 
 ### 과제 4. OTel Collector 다중 분기
 
-동일한 trace 데이터를 Jaeger 와 Elasticsearch (로그 형태로 변환) 양쪽에 동시 전송하도록 Collector 파이프라인 수정
+spanmetrics 커넥터의 버킷 경계와 dimensions(레이블)를 조정하여, 더 세밀한 지연 분포와 HTTP 메서드별 분리 집계가 가능하도록 Collector 파이프라인을 수정
 
 ### 과제 5. Alert 라우팅 분기
 
